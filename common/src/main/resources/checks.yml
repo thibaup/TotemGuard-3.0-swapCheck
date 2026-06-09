@@ -16,7 +16,7 @@ default-punishment: "[BAN] ban %tg_player% Unfair Advantage"
 AutoTotemA:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 4
 
   punishment-commands:
     - "%default_punishment%"
@@ -24,7 +24,7 @@ AutoTotemA:
 AutoTotemB:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 4
 
   punishment-commands:
     - "%default_punishment%"
@@ -32,7 +32,7 @@ AutoTotemB:
 AutoTotemC:
   enabled: true
   punishable: false
-  max-violations: 2147483647
+  max-violations: 4
 
   punishment-commands:
     - "%default_punishment%"
@@ -41,7 +41,7 @@ InventoryA:
   enabled: true
   punishable: true
   mitigate: true
-  max-violations: 2147483647
+  max-violations: 4
 
   punishment-commands:
     - "%default_punishment%"
@@ -50,7 +50,7 @@ InventoryB:
   enabled: true
   punishable: true
   mitigate: true
-  max-violations: 2147483647
+  max-violations: 4
 
   punishment-commands:
     - "%default_punishment%"
@@ -58,7 +58,7 @@ InventoryB:
 InventoryC:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 3
 
   punishment-commands:
     - "%default_punishment%"
@@ -67,7 +67,7 @@ InventoryD:
   enabled: true
   punishable: false
   mitigate: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "%default_punishment%"
@@ -75,7 +75,7 @@ InventoryD:
 ProtocolA:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "%default_punishment%"
@@ -83,7 +83,7 @@ ProtocolA:
 ProtocolB:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "%default_punishment%"
@@ -91,7 +91,7 @@ ProtocolB:
 ProtocolC:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "%default_punishment%"
@@ -99,7 +99,7 @@ ProtocolC:
 ProtocolD:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 1
 
   punishment-commands:
     - "%default_punishment%"
@@ -107,7 +107,7 @@ ProtocolD:
 ProtocolE:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 5
 
   punishment-commands:
     - "%default_punishment%"
@@ -115,7 +115,7 @@ ProtocolE:
 TickA:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "%default_punishment%"
@@ -123,7 +123,7 @@ TickA:
 TickB:
   enabled: true
   punishable: false
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "[KICK] kick %tg_player% Packet Manipulation"
@@ -131,7 +131,7 @@ TickB:
 TickC:
   enabled: true
   punishable: true
-  max-violations: 2147483647
+  max-violations: 10
 
   punishment-commands:
     - "[KICK] kick %tg_player% Packet Manipulation"
@@ -139,7 +139,7 @@ TickC:
 ManualTotemA:
   enabled: true
   punishable: false
-  max-violations: 2147483647
+  max-violations: 1
 
   punishment-commands:
     - "%default_punishment%"
