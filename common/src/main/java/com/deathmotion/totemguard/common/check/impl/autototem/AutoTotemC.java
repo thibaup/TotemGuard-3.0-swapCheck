@@ -24,21 +24,24 @@ import com.deathmotion.totemguard.common.check.annotations.CheckData;
 import com.deathmotion.totemguard.common.check.type.ExtendedCheck;
 import com.deathmotion.totemguard.common.player.TGPlayer;
 import com.deathmotion.totemguard.common.player.inventory.InventoryConstants;
+import com.deathmotion.totemguard.common.player.inventory.enums.Issuer;
+import com.deathmotion.totemguard.common.player.inventory.enums.SlotAction;
+import com.deathmotion.totemguard.common.player.inventory.slot.CarriedItem;
 import com.deathmotion.totemguard.common.player.inventory.slot.InventorySlot;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
+import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerHeldItemChange;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
+import java.util.List;
 
 @CheckData(description = "Synthetic offhand totem swap", type = CheckType.AUTO_TOTEM)
 public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
@@ -49,13 +52,11 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     private static final long MAX_SWITCH_TO_SWAP_MS = 450L;
     private static final long FAST_PACKET_MS = 75L;
     private static final long CLEAN_PACKET_MS = 150L;
-    private static final long RESTOCK_WINDOW_MS = 5_000L;
-    private static final int SAMPLE_SIZE = 4;
+    private static final long STATUS_DUPLICATE_MS = 300L;
 
     private @Nullable Long popTimestamp;
     private long lastStatusPopAt = -1L;
 
-    private long lastSwapPacketAt = -1L;
     private long lastSlotChangeAt = -1L;
     private int lastSlotChangeTo = -1;
     private int lastSlotChangeFrom = -1;
@@ -70,15 +71,6 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     private double pendingBaseWeight;
 
     private long lastOffhandActionAt = -1L;
-    private int lastConsumedHotbar = -1;
-
-    private int lastProfileSource = -1;
-    private int lastProfileRestore = -1;
-    private int repeatedProfileStreak;
-
-    private final Deque<Long> popDelaySamples = new ArrayDeque<>(SAMPLE_SIZE);
-    private final Deque<Long> switchDelaySamples = new ArrayDeque<>(SAMPLE_SIZE);
-    private final Deque<Long> restoreDelaySamples = new ArrayDeque<>(SAMPLE_SIZE);
 
     public AutoTotemC(TGPlayer player) {
         super(player);
@@ -87,7 +79,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     @Override
     protected double flagThreshold() {
-        return 5.0D;
+        return 4.0D;
     }
 
     @Override
@@ -97,7 +89,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     @Override
     public void onTotemActivated(long timestamp) {
-        if (lastStatusPopAt >= 0L && Math.abs(timestamp - lastStatusPopAt) <= MAX_AFTER_POP_MS) {
+        if (lastStatusPopAt >= 0L && Math.abs(timestamp - lastStatusPopAt) <= STATUS_DUPLICATE_MS) {
             return;
         }
         armPop(timestamp);
@@ -105,7 +97,12 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     @Override
     public void onPacketSend(PacketSendEvent event) {
-        if (event.getPacketType() != PacketType.Play.Server.ENTITY_STATUS) return;
+        PacketTypeCommon type = event.getPacketType();
+        if (type == PacketType.Play.Server.HELD_ITEM_CHANGE) {
+            handleServerHeldItemChange(event);
+            return;
+        }
+        if (type != PacketType.Play.Server.ENTITY_STATUS) return;
 
         WrapperPlayServerEntityStatus packet = new WrapperPlayServerEntityStatus(event);
         if (packet.getEntityId() != player.getUser().getEntityId()) return;
@@ -120,31 +117,32 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
         PacketTypeCommon type = event.getPacketType();
         expirePendingRestore(event.getTimestamp());
 
-        if (isTickBoundary(type)) {
-            clearTickState();
-            return;
-        }
-
         if (type == PacketType.Play.Client.HELD_ITEM_CHANGE) {
             handleHeldItemChange(event);
-            return;
-        }
-
-        if (type == PacketType.Play.Client.CLICK_WINDOW) {
-            handleClickWindow(event);
             return;
         }
 
         if (type != PacketType.Play.Client.PLAYER_DIGGING) return;
 
         WrapperPlayClientPlayerDigging packet = new WrapperPlayClientPlayerDigging(event);
-        switch (packet.getAction()) {
-            case SWAP_ITEM_WITH_OFFHAND -> {
-                lastSwapPacketAt = event.getTimestamp();
-                handleOffhandActionSwap(lastSwapPacketAt);
-            }
-            default -> {
-            }
+        if (packet.getAction() == DiggingAction.SWAP_ITEM_WITH_OFFHAND) {
+            handleOffhandActionSwap(event.getTimestamp());
+        }
+    }
+
+    @Override
+    public void onInventoryChanged(@Nullable CarriedItem updatedCarriedItem,
+                                   @NotNull List<InventorySlot> changedSlots,
+                                   @NotNull Issuer lastIssuer) {
+        if (lastIssuer != Issuer.CLIENT) return;
+
+        for (InventorySlot changedSlot : changedSlots) {
+            if (changedSlot.getSlot() != InventoryConstants.SLOT_OFFHAND) continue;
+            if (changedSlot.getSlotAction() != SlotAction.SWAP) continue;
+            if (!changedToTotem(changedSlot)) continue;
+
+            handleDetectedSwap(changedSlot.getUpdated(), true);
+            return;
         }
     }
 
@@ -162,7 +160,23 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
         knownSelectedHotbarIndex = slot;
     }
 
+    private void handleServerHeldItemChange(PacketSendEvent event) {
+        WrapperPlayServerHeldItemChange packet = new WrapperPlayServerHeldItemChange(event);
+        int slot = packet.getSlot();
+        if (isHotbarIndex(slot)) {
+            knownSelectedHotbarIndex = slot;
+        }
+    }
+
     private void handleOffhandActionSwap(long timestamp) {
+        handleDetectedSwap(timestamp, offhandChangedToTotem(timestamp));
+    }
+
+    private void handleDetectedSwap(long timestamp, boolean offhandFilled) {
+        if (lastOffhandActionAt >= 0L && Math.abs(timestamp - lastOffhandActionAt) <= 5L) {
+            return;
+        }
+
         Long popAt = activePop(timestamp);
         if (popAt == null) {
             clearPendingRestore();
@@ -170,29 +184,24 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
         }
 
         int sourceHotbar = inventory.getSelectedHotbarIndex();
-        int sourceSlot = InventoryConstants.HOTBAR_START + sourceHotbar;
-        boolean switchedToSource = hasRecentSlotChange(timestamp)
-                && lastSlotChangeTo == sourceHotbar
-                && lastSlotChangeFrom != sourceHotbar;
-        boolean sourceHadTotem = hadTotemBeforeSwap(sourceSlot);
-        boolean offhandFilled = offhandChangedToTotem(timestamp);
-
-        if (!sourceHadTotem && !offhandFilled) {
+        if (!isHotbarIndex(sourceHotbar)) {
             clearPendingRestore();
             return;
         }
 
+        boolean switchedToSource = hasRecentSlotChange(timestamp)
+                && lastSlotChangeTo == sourceHotbar
+                && isHotbarIndex(lastSlotChangeFrom)
+                && lastSlotChangeFrom != sourceHotbar;
         long popDelay = timestamp - popAt;
         long switchDelay = switchedToSource ? timestamp - lastSlotChangeAt : -1L;
-        double weight = scoreSwap(popDelay, switchDelay, switchedToSource, sourceHadTotem, offhandFilled);
+        double weight = scoreSwap(popDelay, switchDelay, switchedToSource, offhandFilled);
 
         lastOffhandActionAt = timestamp;
-        lastConsumedHotbar = sourceHotbar;
         popTimestamp = null;
 
         if (switchedToSource) {
             int restoreHotbar = lastSlotChangeFrom;
-            weight += repeatedProfileBonus(sourceHotbar, restoreHotbar);
             awaitingRestore = true;
             pendingSwapAt = timestamp;
             pendingSourceHotbar = sourceHotbar;
@@ -200,51 +209,20 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
             pendingPopDelay = popDelay;
             pendingSwitchDelay = switchDelay;
             pendingBaseWeight = weight;
-        } else {
-            awaitingRestore = false;
-            pendingSourceHotbar = sourceHotbar;
-            pendingRestoreHotbar = -1;
-            pendingPopDelay = popDelay;
-            pendingSwitchDelay = -1L;
-            pendingBaseWeight = weight;
+            return;
         }
 
+        clearPendingRestore();
+
         punish(weight,
-                "offhand action,popDelay={0}ms,switchDelay={1}ms,source={2},restore={3}",
-                popDelay, switchDelay, sourceHotbar, pendingRestoreHotbar);
+                "offhand action,popDelay={0}ms,switchDelay={1}ms,source={2}",
+                popDelay, switchDelay, sourceHotbar);
     }
 
-    private void handleClickWindow(PacketReceiveEvent event) {
-        WrapperPlayClientClickWindow packet = new WrapperPlayClientClickWindow(event);
-        if (player.isModDetectionWindow(packet.getWindowId())) return;
-        if (packet.getWindowId() != InventoryConstants.PLAYER_WINDOW_ID) return;
-        if (packet.getWindowClickType() != WrapperPlayClientClickWindow.WindowClickType.SWAP) return;
-
-        int targetHotbar = packet.getButton();
-        if (targetHotbar < 0 || targetHotbar > 8) return;
-        if (targetHotbar != lastConsumedHotbar) return;
-
-        long timestamp = event.getTimestamp();
-        long sinceSwap = timestamp - lastOffhandActionAt;
-        if (sinceSwap < 0L || sinceSwap > RESTOCK_WINDOW_MS) return;
-
-        int hotbarSlot = InventoryConstants.HOTBAR_START + targetHotbar;
-        if (!slotChangedToTotem(hotbarSlot, timestamp, RESTOCK_WINDOW_MS)) return;
-
-        punish(0.75D,
-                "post-swap hotbar restock,delay={0}ms,target={1},slot={2}",
-                sinceSwap, targetHotbar, packet.getSlot());
-    }
-
-    private double scoreSwap(long popDelay,
-                             long switchDelay,
-                             boolean switchedToSource,
-                             boolean sourceHadTotem,
-                             boolean offhandFilled) {
-        double weight = 0.20D;
+    private double scoreSwap(long popDelay, long switchDelay, boolean switchedToSource, boolean offhandFilled) {
+        double weight = 0.60D;
 
         if (offhandFilled) weight += 0.25D;
-        if (sourceHadTotem) weight += 0.15D;
 
         if (popDelay <= FAST_PACKET_MS) {
             weight += 0.60D;
@@ -275,76 +253,18 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
             clearPendingRestore();
             return;
         }
-        if (slot != pendingRestoreHotbar || slot == pendingSourceHotbar) return;
+        if (slot != pendingRestoreHotbar) return;
 
         double restoreWeight = restoreDelay <= FAST_PACKET_MS
                 ? 0.85D
                 : restoreDelay <= CLEAN_PACKET_MS ? 0.60D : 0.30D;
-        double consistency = consistencyBonus(pendingPopDelay, pendingSwitchDelay, restoreDelay);
+        double totalWeight = pendingBaseWeight + restoreWeight;
 
-        punish(restoreWeight + consistency,
-                "offhand action restore,popDelay={0}ms,switchDelay={1}ms,restoreDelay={2}ms,source={3},restore={4},base={5}",
-                pendingPopDelay, pendingSwitchDelay, restoreDelay, pendingSourceHotbar, pendingRestoreHotbar,
-                String.format("%.2f", pendingBaseWeight));
+        punish(totalWeight,
+                "offhand action sandwich,popDelay={0}ms,switchDelay={1}ms,restoreDelay={2}ms,source={3},restore={4}",
+                pendingPopDelay, pendingSwitchDelay, restoreDelay, pendingSourceHotbar, pendingRestoreHotbar);
 
         clearPendingRestore();
-    }
-
-    private double repeatedProfileBonus(int sourceHotbar, int restoreHotbar) {
-        if (sourceHotbar == lastProfileSource && restoreHotbar == lastProfileRestore) {
-            repeatedProfileStreak++;
-        } else {
-            lastProfileSource = sourceHotbar;
-            lastProfileRestore = restoreHotbar;
-            repeatedProfileStreak = 1;
-        }
-
-        return repeatedProfileStreak >= 3 ? 0.35D : repeatedProfileStreak == 2 ? 0.20D : 0.0D;
-    }
-
-    private double consistencyBonus(long popDelay, long switchDelay, long restoreDelay) {
-        addSample(popDelaySamples, popDelay);
-        addSample(switchDelaySamples, switchDelay);
-        addSample(restoreDelaySamples, restoreDelay);
-
-        if (restoreDelaySamples.size() < 3) return 0.0D;
-
-        double popStdDev = stdDev(popDelaySamples);
-        double switchStdDev = stdDev(switchDelaySamples);
-        double restoreStdDev = stdDev(restoreDelaySamples);
-
-        if (popStdDev <= 25.0D && switchStdDev <= 15.0D && restoreStdDev <= 15.0D) {
-            return 0.80D;
-        }
-        if (popStdDev <= 50.0D && switchStdDev <= 30.0D && restoreStdDev <= 30.0D) {
-            return 0.45D;
-        }
-        return 0.0D;
-    }
-
-    private void addSample(Deque<Long> samples, long sample) {
-        if (sample < 0L) return;
-        if (samples.size() >= SAMPLE_SIZE) {
-            samples.removeFirst();
-        }
-        samples.addLast(sample);
-    }
-
-    private double stdDev(Deque<Long> samples) {
-        if (samples.isEmpty()) return 0.0D;
-
-        double mean = 0.0D;
-        for (long sample : samples) {
-            mean += sample;
-        }
-        mean /= samples.size();
-
-        double variance = 0.0D;
-        for (long sample : samples) {
-            double diff = sample - mean;
-            variance += diff * diff;
-        }
-        return Math.sqrt(variance / samples.size());
     }
 
     private void expirePendingRestore(long timestamp) {
@@ -382,11 +302,8 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
                 && timestamp - lastSlotChangeAt <= MAX_SWITCH_TO_SWAP_MS;
     }
 
-    private boolean hadTotemBeforeSwap(int slot) {
-        InventorySlot inventorySlot = inventory.getSlots().get(slot);
-        if (inventorySlot == null) return false;
-        return inventorySlot.getPrevious().item().getType() == ItemTypes.TOTEM_OF_UNDYING
-                && inventorySlot.getUpdated() >= lastSwapPacketAt - RESTORE_WINDOW_MS;
+    private boolean isHotbarIndex(int slot) {
+        return slot >= 0 && slot <= 8;
     }
 
     private boolean offhandChangedToTotem(long timestamp) {
@@ -396,23 +313,18 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     private boolean slotChangedToTotem(int slot, long timestamp, long windowMs) {
         InventorySlot inventorySlot = inventory.getSlots().get(slot);
         if (inventorySlot == null) return false;
-        if (inventorySlot.getItem().getType() != ItemTypes.TOTEM_OF_UNDYING) return false;
-        if (inventorySlot.getPrevious().item().getType() == ItemTypes.TOTEM_OF_UNDYING) return false;
-        return Math.abs(inventorySlot.getUpdated() - timestamp) <= windowMs;
+        if (!changedToTotem(inventorySlot)) return false;
+        long updated = inventorySlot.getUpdated();
+        return updated <= timestamp && timestamp - updated <= windowMs;
+    }
+
+    private boolean changedToTotem(InventorySlot inventorySlot) {
+        return inventorySlot.getItem().getType() == ItemTypes.TOTEM_OF_UNDYING
+                && inventorySlot.getPrevious().item().getType() != ItemTypes.TOTEM_OF_UNDYING;
     }
 
     private void armPop(long timestamp) {
         popTimestamp = timestamp;
         clearPendingRestore();
-    }
-
-    private boolean isTickBoundary(PacketTypeCommon type) {
-        return player.supportsEndTick()
-                ? type == PacketType.Play.Client.CLIENT_TICK_END
-                : WrapperPlayClientPlayerFlying.isFlying(type);
-    }
-
-    private void clearTickState() {
-        lastSwapPacketAt = -1L;
     }
 }
