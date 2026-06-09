@@ -22,6 +22,7 @@ import com.deathmotion.totemguard.api.check.Check;
 import com.deathmotion.totemguard.common.cache.data.CheckSnapshot;
 import com.deathmotion.totemguard.common.check.impl.autototem.AutoTotemA;
 import com.deathmotion.totemguard.common.check.impl.autototem.AutoTotemB;
+import com.deathmotion.totemguard.common.check.impl.autototem.AutoTotemC;
 import com.deathmotion.totemguard.common.check.impl.inventory.InventoryA;
 import com.deathmotion.totemguard.common.check.impl.inventory.InventoryB;
 import com.deathmotion.totemguard.common.check.impl.inventory.InventoryC;
@@ -102,6 +103,7 @@ public class CheckManagerImpl {
                 .build();
 
         ImmutableClassToInstanceMap<ExtendedCheck> extendedChecks = ImmutableClassToInstanceMap.<ExtendedCheck>builder()
+                .put(AutoTotemC.class, new AutoTotemC(player))
                 .build();
 
         this.manualChecks = ImmutableClassToInstanceMap.<ManualCheck>builder()
@@ -112,6 +114,7 @@ public class CheckManagerImpl {
         this.allChecks = ImmutableClassToInstanceMap.<Check>builder()
                 .putAll(packetChecks)
                 .putAll(eventChecks)
+                .putAll(extendedChecks)
                 .putAll(manualChecks)
                 .build();
 
