@@ -47,12 +47,11 @@ import java.util.List;
 public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     private static final int TOTEM_OF_UNDYING_STATUS = 35;
-    private static final long MAX_AFTER_POP_MS = 2_000L;
-    private static final long RESTORE_WINDOW_MS = 650L;
-    private static final long MAX_SWITCH_TO_SWAP_MS = 450L;
+    private static final long MAX_AFTER_POP_MS = 1000L;
+    private static final long RESTORE_WINDOW_MS = 350L;
+    private static final long MAX_SWITCH_TO_SWAP_MS = 300L;
     private static final long FAST_PACKET_MS = 75L;
     private static final long CLEAN_PACKET_MS = 150L;
-    private static final long STATUS_DUPLICATE_MS = 300L;
 
     private @Nullable Long popTimestamp;
     private long lastStatusPopAt = -1L;
@@ -89,7 +88,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     @Override
     public void onTotemActivated(long timestamp) {
-        if (lastStatusPopAt >= 0L && Math.abs(timestamp - lastStatusPopAt) <= STATUS_DUPLICATE_MS) {
+        if (lastStatusPopAt >= 0L && Math.abs(timestamp - lastStatusPopAt) <= MAX_AFTER_POP_MS) {
             return;
         }
         armPop(timestamp);
@@ -193,6 +192,12 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
                 && lastSlotChangeTo == sourceHotbar
                 && isHotbarIndex(lastSlotChangeFrom)
                 && lastSlotChangeFrom != sourceHotbar;
+
+        if (!offhandFilled && !switchedToSource) {
+            clearPendingRestore();
+            return;
+        }
+
         long popDelay = timestamp - popAt;
         long switchDelay = switchedToSource ? timestamp - lastSlotChangeAt : -1L;
         double weight = scoreSwap(popDelay, switchDelay, switchedToSource, offhandFilled);
