@@ -47,29 +47,34 @@ import java.util.List;
 public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     private static final int TOTEM_OF_UNDYING_STATUS = 35;
+    private static final int MIN_HOTBAR_INDEX = 0;
+    private static final int MAX_HOTBAR_INDEX = 8;
+    private static final int NO_HOTBAR_INDEX = -1;
+    private static final long NO_TIMESTAMP = -1L;
     private static final long MAX_AFTER_POP_MS = 1000L;
     private static final long RESTORE_WINDOW_MS = 350L;
     private static final long MAX_SWITCH_TO_SWAP_MS = 300L;
+    private static final long DUPLICATE_OFFHAND_ACTION_MS = 5L;
     private static final long FAST_PACKET_MS = 75L;
     private static final long CLEAN_PACKET_MS = 150L;
 
-    private @Nullable Long popTimestamp;
-    private long lastStatusPopAt = -1L;
+    private long activePopAt = NO_TIMESTAMP;
+    private long lastStatusPopAt = NO_TIMESTAMP;
 
-    private long lastSlotChangeAt = -1L;
-    private int lastSlotChangeTo = -1;
-    private int lastSlotChangeFrom = -1;
+    private long lastSlotChangeAt = NO_TIMESTAMP;
+    private int lastSlotChangeTo = NO_HOTBAR_INDEX;
+    private int lastSlotChangeFrom = NO_HOTBAR_INDEX;
     private int knownSelectedHotbarIndex;
 
     private boolean awaitingRestore;
-    private long pendingSwapAt = -1L;
-    private int pendingSourceHotbar = -1;
-    private int pendingRestoreHotbar = -1;
-    private long pendingPopDelay = -1L;
-    private long pendingSwitchDelay = -1L;
+    private long pendingSwapAt = NO_TIMESTAMP;
+    private int pendingSourceHotbar = NO_HOTBAR_INDEX;
+    private int pendingRestoreHotbar = NO_HOTBAR_INDEX;
+    private long pendingPopDelay = NO_TIMESTAMP;
+    private long pendingSwitchDelay = NO_TIMESTAMP;
     private double pendingBaseWeight;
 
-    private long lastOffhandActionAt = -1L;
+    private long lastOffhandActionAt = NO_TIMESTAMP;
 
     public AutoTotemC(TGPlayer player) {
         super(player);
@@ -88,7 +93,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     @Override
     public void onTotemActivated(long timestamp) {
-        if (lastStatusPopAt >= 0L && Math.abs(timestamp - lastStatusPopAt) <= MAX_AFTER_POP_MS) {
+        if (lastStatusPopAt != NO_TIMESTAMP && Math.abs(timestamp - lastStatusPopAt) <= MAX_AFTER_POP_MS) {
             return;
         }
         armPop(timestamp);
@@ -148,7 +153,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     private void handleHeldItemChange(PacketReceiveEvent event) {
         WrapperPlayClientHeldItemChange packet = new WrapperPlayClientHeldItemChange(event);
         int slot = packet.getSlot();
-        if (slot < 0 || slot > 8) return;
+        if (!isHotbarIndex(slot)) return;
 
         long timestamp = event.getTimestamp();
         detectRestore(slot, timestamp);
@@ -172,12 +177,12 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     }
 
     private void handleDetectedSwap(long timestamp, boolean offhandFilled) {
-        if (lastOffhandActionAt >= 0L && Math.abs(timestamp - lastOffhandActionAt) <= 5L) {
+        if (isDuplicateOffhandAction(timestamp)) {
             return;
         }
 
-        Long popAt = activePop(timestamp);
-        if (popAt == null) {
+        long popAt = activePop(timestamp);
+        if (popAt == NO_TIMESTAMP) {
             clearPendingRestore();
             return;
         }
@@ -199,11 +204,11 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
         }
 
         long popDelay = timestamp - popAt;
-        long switchDelay = switchedToSource ? timestamp - lastSlotChangeAt : -1L;
+        long switchDelay = switchedToSource ? timestamp - lastSlotChangeAt : NO_TIMESTAMP;
         double weight = scoreSwap(popDelay, switchDelay, switchedToSource, offhandFilled);
 
         lastOffhandActionAt = timestamp;
-        popTimestamp = null;
+        activePopAt = NO_TIMESTAMP;
 
         if (switchedToSource) {
             int restoreHotbar = lastSlotChangeFrom;
@@ -281,34 +286,38 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
 
     private void clearPendingRestore() {
         awaitingRestore = false;
-        pendingSwapAt = -1L;
-        pendingSourceHotbar = -1;
-        pendingRestoreHotbar = -1;
-        pendingPopDelay = -1L;
-        pendingSwitchDelay = -1L;
+        pendingSwapAt = NO_TIMESTAMP;
+        pendingSourceHotbar = NO_HOTBAR_INDEX;
+        pendingRestoreHotbar = NO_HOTBAR_INDEX;
+        pendingPopDelay = NO_TIMESTAMP;
+        pendingSwitchDelay = NO_TIMESTAMP;
         pendingBaseWeight = 0.0D;
     }
 
-    private @Nullable Long activePop(long timestamp) {
-        Long popAt = popTimestamp;
-        if (popAt == null) return null;
+    private long activePop(long timestamp) {
+        if (activePopAt == NO_TIMESTAMP) return NO_TIMESTAMP;
 
-        long delay = timestamp - popAt;
+        long delay = timestamp - activePopAt;
         if (delay < 0L || delay > MAX_AFTER_POP_MS) {
-            popTimestamp = null;
-            return null;
+            activePopAt = NO_TIMESTAMP;
+            return NO_TIMESTAMP;
         }
-        return popAt;
+        return activePopAt;
     }
 
     private boolean hasRecentSlotChange(long timestamp) {
-        return lastSlotChangeAt >= 0L
+        return lastSlotChangeAt != NO_TIMESTAMP
                 && lastSlotChangeAt <= timestamp
                 && timestamp - lastSlotChangeAt <= MAX_SWITCH_TO_SWAP_MS;
     }
 
     private boolean isHotbarIndex(int slot) {
-        return slot >= 0 && slot <= 8;
+        return slot >= MIN_HOTBAR_INDEX && slot <= MAX_HOTBAR_INDEX;
+    }
+
+    private boolean isDuplicateOffhandAction(long timestamp) {
+        return lastOffhandActionAt != NO_TIMESTAMP
+                && Math.abs(timestamp - lastOffhandActionAt) <= DUPLICATE_OFFHAND_ACTION_MS;
     }
 
     private boolean offhandChangedToTotem(long timestamp) {
@@ -329,7 +338,7 @@ public class AutoTotemC extends HeuristicCheck implements ExtendedCheck {
     }
 
     private void armPop(long timestamp) {
-        popTimestamp = timestamp;
+        activePopAt = timestamp;
         clearPendingRestore();
     }
 }
